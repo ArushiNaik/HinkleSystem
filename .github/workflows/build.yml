@@ -1,0 +1,56 @@
+name: Build and deliver
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  release:
+    types: [published]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: hinkle_test
+          POSTGRES_USER: hinkle
+          POSTGRES_PASSWORD: ci_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hinkle -d hinkle_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/hinkle_test
+      SPRING_DATASOURCE_USERNAME: hinkle
+      SPRING_DATASOURCE_PASSWORD: ci_only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hinkle
+          path: build/libs/hinkle.jar
+          if-no-files-found: error
+  deliver:
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: hinkle
+      - name: Attach tested application to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" hinkle.jar --repo "$GITHUB_REPOSITORY" --clobber
